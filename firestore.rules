@@ -1,0 +1,17 @@
+rules_version = '2';
+// デイリー手帳の Firestore ルール
+// ・ログインした本人だけが、自分の場所（users/自分のID/items）を読み書きできる
+// ・保存できるのは暗号文（c）とサーバーの時刻（u）だけ。大きさにも上限を付ける
+// ・削除は使わない（消したことも暗号文として記録する）
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid}/items/{itemId} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['c', 'u'])
+        && request.resource.data.c is string
+        && request.resource.data.c.size() < 100000
+        && request.resource.data.u == request.time;
+    }
+  }
+}

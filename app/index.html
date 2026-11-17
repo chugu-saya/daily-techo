@@ -206,6 +206,17 @@ button{cursor:pointer}
 .toast{position:fixed;left:50%;bottom:max(20px,env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:10px 16px;border-radius:8px;display:flex;gap:14px;align-items:center;z-index:60;font-size:.9rem;box-shadow:var(--shadow);max-width:calc(100% - 32px)}
 .toast button{background:none;border:none;color:var(--paper);text-decoration:underline;font-weight:700;padding:0}
 
+/* 同期 */
+.sync-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-left:6px;vertical-align:middle;background:transparent}
+[data-sync="synced"] .sync-dot{background:var(--done)}
+[data-sync="pending"] .sync-dot,[data-sync="connecting"] .sync-dot{background:var(--b)}
+[data-sync="offline"] .sync-dot{background:var(--ink-faint)}
+[data-sync="error"] .sync-dot{background:var(--a)}
+.sheet input[type=email],.sheet input[type=password]{display:block;width:100%;margin-top:8px;padding:10px;border:1px solid color-mix(in srgb,var(--ink) 20%,transparent);border-radius:6px;background:var(--paper2);font-size:16px;outline:none}
+.sheet input:focus{border-color:var(--accent)}
+.sheet .btn:disabled{opacity:.5;cursor:wait}
+.mh{margin-top:18px!important;font-size:1rem!important}
+
 @media (max-width:600px){
   .brand{font-size:.95rem;letter-spacing:.05em}
   .nav button{padding:6px 9px;font-size:.88rem}
@@ -235,7 +246,7 @@ button{cursor:pointer}
       <button id="today" type="button">今日</button>
       <button id="next" type="button" title="次の日（Alt+→）" aria-label="次の日">›</button>
       <button id="calBtn" type="button" title="カレンダー">暦</button>
-      <button id="menuBtn" type="button">保存</button>
+      <button id="menuBtn" type="button">保存<span class="sync-dot" aria-hidden="true"></span></button>
     </nav>
   </div>
 </header>
@@ -301,6 +312,20 @@ button{cursor:pointer}
     <button class="btn primary" id="exportBtn" type="button">⬇ バックアップを書き出す（.json）</button>
     <button class="btn" id="importBtn" type="button">⬆ バックアップから読み込む</button>
     <p id="menuInfo"></p>
+    <div id="syncBox" hidden>
+      <h3 class="mh">PC・スマホの同期</h3>
+      <p id="syncStatus"></p>
+      <div id="syncForm">
+        <input type="email" id="syncEmail" placeholder="メールアドレス" autocomplete="username" inputmode="email">
+        <input type="password" id="syncPass" placeholder="合言葉（10文字以上）" autocomplete="current-password">
+        <input type="password" id="syncPass2" placeholder="合言葉をもう一度（はじめて設定する時だけ）" autocomplete="new-password">
+        <button class="btn primary" id="syncLogin" type="button">🔗 ほかの端末と同じ手帳につなぐ</button>
+        <button class="btn" id="syncCreate" type="button">✨ はじめて同期を設定する</button>
+        <p id="syncErr" class="warn" role="alert"></p>
+        <p>内容はこの端末で合言葉を使って暗号化してから送るので、サーバー側では読めません。<b>合言葉を忘れると、サーバーのデータは誰にも元に戻せません。</b>紙などに控えておいてください。</p>
+      </div>
+      <button class="btn" id="syncLogout" type="button" hidden>この端末の同期をやめる</button>
+    </div>
     <div id="installBox" hidden>
       <h3 style="margin-top:16px;font-size:1rem">アプリとして入れる</h3>
       <button class="btn primary" id="installBtn" type="button" hidden>📲 この端末にインストール</button>
@@ -360,6 +385,7 @@ button{cursor:pointer}
     try { localStorage.setItem(KEY, JSON.stringify(db)); saveError = false; }
     catch (e) { saveError = true; }
     renderFoot();
+    if (S) enqueue(pushDiff);
   }
   let timer;
   const saveSoon = () => { clearTimeout(timer); timer = setTimeout(save, 400); };
@@ -480,7 +506,7 @@ button{cursor:pointer}
       f.append(w); return;
     }
     const days = Object.keys(db.days).length;
-    let msg = `この端末に自動保存中（${days}日分）`;
+    let msg = S ? (SYNC_LABEL[syncStatus] || '同期中') + `（${days}日分）` : `この端末に自動保存中（${days}日分）`;
     const span = el('span');
     if (db.lastBackup) {
       const ago = Math.floor((Date.now() - new Date(db.lastBackup)) / 864e5);
@@ -615,7 +641,8 @@ button{cursor:pointer}
       try { data = JSON.parse(r.result); } catch (err) { alert('ファイルを読み込めませんでした（形式が違います）'); return; }
       if (!data || typeof data.days !== 'object') { alert('この手帳のバックアップではないようです'); return; }
       const n = Object.keys(data.days).length;
-      if (!confirm(`${n}日分のデータを読み込みます。\nこの端末にある今のデータは置き換えられます。よろしいですか？`)) return;
+      if (!confirm(`${n}日分のデータを読み込みます。\nこの端末にある今のデータは置き換えられます。` +
+        (S ? '\n同期中のため、ほかの端末の内容も同じように置き換わります。' : '') + '\nよろしいですか？')) return;
       db = data; db.version ||= 1; save(); render(); renderMenuInfo();
       $('menuModal').hidden = true; toast(`${n}日分を読み込みました`);
     };
@@ -658,7 +685,7 @@ button{cursor:pointer}
   $('today').onclick = () => { save(); cur = todayKey(); render(); };
   $('calBtn').onclick = openCal;
   $('dateHead').onclick = openCal;
-  $('menuBtn').onclick = () => { renderMenuInfo(); renderInstall(); $('menuModal').hidden = false; };
+  $('menuBtn').onclick = () => { renderMenuInfo(); renderSyncBox(); renderInstall(); $('menuModal').hidden = false; };
   $('menuClose').onclick = () => { $('menuModal').hidden = true; };
   $('exportBtn').onclick = exportData;
   $('importBtn').onclick = () => $('importFile').click();
@@ -690,6 +717,325 @@ button{cursor:pointer}
     if (e.altKey && e.key === 'ArrowLeft') { e.preventDefault(); go(-1); }
     if (e.altKey && e.key === 'ArrowRight') { e.preventDefault(); go(1); }
   });
+
+  // ---------- 同期（Firebase。端末内で暗号化してから送る） ----------
+  // 合言葉から「ログイン用パスワード」と「暗号化の鍵」を別々に作る。Google に渡るのはログイン用だけで、
+  // 暗号化の鍵は端末の外に出ない。データはタスク1件・メモ1日分・予定1日分ごとに暗号化して保存する。
+  // Firebase の設定（公開しても問題ない値。データはルールと暗号化で守る）
+  const FIREBASE_CONFIG = {
+    apiKey: 'AIzaSyAbsQOrlDD3s722xb1wTSjw8psYfYYI0BE',
+    authDomain: 'daily-techo.firebaseapp.com',
+    projectId: 'daily-techo',
+    storageBucket: 'daily-techo.firebasestorage.app',
+    messagingSenderId: '1057409729407',
+    appId: '1:1057409729407:web:86f3ae74aff9748767904a'
+  };
+  const FB_VER = '11.0.2';
+  const SYNC_KEY = 'daily-techo-sync';
+  const syncOn = !!FIREBASE_CONFIG && /^https?:$/.test(location.protocol) && !!(window.crypto && crypto.subtle);
+  const SYNC_LABEL = {
+    off: '', connecting: '同期：接続中…', synced: '同期：最新です', pending: '同期：送信中…',
+    offline: '同期：オフライン（つながったら自動で送ります）', error: '同期：エラー'
+  };
+  let syncState = (() => { try { return JSON.parse(localStorage.getItem(SYNC_KEY)) || null; } catch (e) { return null; } })();
+  const saveSyncState = () => {
+    try { syncState ? localStorage.setItem(SYNC_KEY, JSON.stringify(syncState)) : localStorage.removeItem(SYNC_KEY); } catch (e) {}
+  };
+  let S = null;              // 動いている同期
+  let syncStatus = 'off', syncMsg = '';
+  let chain = Promise.resolve();
+  const enqueue = f => (chain = chain.then(f).catch(err => console.error(err)));
+
+  // --- 暗号 ---
+  const te = new TextEncoder(), td = new TextDecoder();
+  const b64 = buf => { const a = new Uint8Array(buf); let s = ''; for (let i = 0; i < a.length; i += 0x8000) s += String.fromCharCode.apply(null, a.subarray(i, i + 0x8000)); return btoa(s); };
+  const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+  async function deriveKeys(email, pass) {
+    const base = await crypto.subtle.importKey('raw', te.encode(pass.normalize('NFC')), 'PBKDF2', false, ['deriveBits']);
+    const bits = new Uint8Array(await crypto.subtle.deriveBits(
+      {name: 'PBKDF2', hash: 'SHA-256', salt: te.encode('daily-techo/v1/' + email.trim().toLowerCase()), iterations: 600000}, base, 768));
+    return {
+      authPw: b64(bits.slice(0, 32)),
+      encKey: await crypto.subtle.importKey('raw', bits.slice(32, 64), {name: 'AES-GCM'}, false, ['encrypt', 'decrypt']),
+      macKey: await crypto.subtle.importKey('raw', bits.slice(64, 96), {name: 'HMAC', hash: 'SHA-256'}, false, ['sign'])
+    };
+  }
+  async function encrypt(key, obj) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = new Uint8Array(await crypto.subtle.encrypt({name: 'AES-GCM', iv}, key, te.encode(JSON.stringify(obj))));
+    const out = new Uint8Array(12 + ct.length); out.set(iv); out.set(ct, 12);
+    return b64(out);
+  }
+  async function decrypt(key, s) {
+    const a = unb64(s);
+    return JSON.parse(td.decode(await crypto.subtle.decrypt({name: 'AES-GCM', iv: a.slice(0, 12)}, key, a.slice(12))));
+  }
+  const idCaches = new WeakMap(); // 鍵ごとに覚えておく
+  async function docIdFor(macKey, lid) { // 文書名からも日付などが分からないようにする
+    let m = idCaches.get(macKey);
+    if (!m) idCaches.set(macKey, m = new Map());
+    if (m.has(lid)) return m.get(lid);
+    const id = b64(await crypto.subtle.sign('HMAC', macKey, te.encode(lid))).replace(/\+/g, '-').replace(/\//g, '_').slice(0, 32);
+    m.set(lid, id); return id;
+  }
+  const hash = s => { // 変更を見つけるための短い指紋
+    let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+    for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); h1 = Math.imul(h1 ^ c, 2654435761); h2 = Math.imul(h2 ^ c, 1597334677); }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+  };
+
+  // --- 鍵の保管（取り出せない形で IndexedDB に） ---
+  const idb = () => new Promise((res, rej) => {
+    const r = indexedDB.open('daily-techo', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('kv');
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  });
+  async function kvGet(k) { const d = await idb(); return new Promise((res, rej) => { const q = d.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); }
+  async function kvSet(k, v) {
+    const d = await idb();
+    return new Promise((res, rej) => {
+      const t = d.transaction('kv', 'readwrite'), s = t.objectStore('kv');
+      v === undefined ? s.delete(k) : s.put(v, k);
+      t.oncomplete = () => res(); t.onerror = () => rej(t.error);
+    });
+  }
+
+  // --- 手帳データ ⇔ 同期する単位 ---
+  const normSched = s => Object.fromEntries(Object.entries(s || {}).filter(([, v]) => v).sort((a, b) => a[0] - b[0]));
+  function itemsOf(data) {
+    const m = new Map();
+    for (const [day, d] of Object.entries(data.days)) {
+      for (const t of d.tasks || []) m.set('task:' + t.id, {day, task: t});
+      if (d.notes) m.set('notes:' + day, {day, notes: d.notes});
+      const s = normSched(d.sched);
+      if (Object.keys(s).length) m.set('sched:' + day, {day, sched: s});
+    }
+    return m;
+  }
+  function applyItem(lid, v) {
+    const i = lid.indexOf(':'), kind = lid.slice(0, i), key = lid.slice(i + 1);
+    if (kind === 'task') {
+      let placed = false;
+      for (const [day, d] of Object.entries(db.days)) {
+        const j = (d.tasks || []).findIndex(t => t.id === key);
+        if (j < 0) continue;
+        if (v && v.day === day && !placed) { d.tasks[j] = v.task; placed = true; } else d.tasks.splice(j, 1);
+      }
+      if (v && !placed) getDay(v.day).tasks.push(v.task);
+    } else if (kind === 'notes') {
+      if (v) getDay(v.day).notes = v.notes; else if (db.days[key]) db.days[key].notes = '';
+    } else if (kind === 'sched') {
+      if (v) getDay(v.day).sched = {...v.sched}; else if (db.days[key]) db.days[key].sched = {};
+    }
+  }
+  function mergeVals(lid, mine, theirs) { // 最初につないだ時だけ：両方にある同じ日のメモ・予定はつなげて残す
+    if (lid.startsWith('notes:')) {
+      if (theirs.notes.includes(mine.notes)) return theirs;
+      return {day: theirs.day, notes: theirs.notes + '\n――――\n' + mine.notes};
+    }
+    if (lid.startsWith('sched:')) {
+      const s = {...theirs.sched};
+      for (const [h, v] of Object.entries(mine.sched)) if (v && s[h] !== v) s[h] = s[h] ? s[h] + ' ／ ' + v : v;
+      return {day: theirs.day, sched: normSched(s)};
+    }
+    return theirs;
+  }
+
+  // --- 受信・送信 ---
+  let fb = null;
+  async function loadFirebase() {
+    if (fb) return fb;
+    const base = `https://www.gstatic.com/firebasejs/${FB_VER}/`;
+    const [A0, A, F] = await Promise.all(['app', 'auth', 'firestore'].map(n => import(base + `firebase-${n}.js`)));
+    const app = A0.getApps().length ? A0.getApp() : A0.initializeApp(FIREBASE_CONFIG);
+    let fs;
+    try { fs = F.initializeFirestore(app, {localCache: F.persistentLocalCache({tabManager: F.persistentMultipleTabManager()})}); }
+    catch (e) { fs = F.getFirestore(app); }
+    fb = {auth: A.getAuth(app), fs, A, F};
+    return fb;
+  }
+
+  async function startSync(keys, initialMerge) {
+    const {auth, fs, F} = await loadFirebase();
+    const user = auth.currentUser;
+    if (!user) { setSync('off'); return; }
+    if (!syncState || syncState.uid !== user.uid) { syncState = {uid: user.uid, email: user.email, since: 0, items: {}}; initialMerge = true; }
+    saveSyncState();
+    S = {keys, initial: initialMerge, pending: 0, fromCache: true, F, col: F.collection(fs, 'users', user.uid, 'items')};
+    setSync('connecting');
+    // 前回までに受け取った分は読み直さない（読み取り回数の節約）
+    const since = syncState.since ? syncState.since - 5 * 60 * 1000 : 0;
+    const q = since > 0 ? F.query(S.col, F.where('u', '>', F.Timestamp.fromMillis(since))) : S.col;
+    S.unsub = F.onSnapshot(q, {includeMetadataChanges: true},
+      snap => enqueue(() => handleSnap(snap)),
+      err => setSync('error', err.code === 'permission-denied' ? 'アクセスが拒否されました。Firestore のルールを確認してください' : err.message));
+    if (!S.initial) enqueue(pushDiff); // オフライン中にたまった変更を送る
+  }
+
+  async function handleSnap(snap) {
+    if (!S) return;
+    const mine = S.initial ? itemsOf(db) : null;
+    let changed = false;
+    for (const ch of snap.docChanges()) {
+      if (ch.type === 'removed' || ch.doc.metadata.hasPendingWrites) continue; // 自分の送信中のもの
+      const data = ch.doc.data();
+      const u = data.u && data.u.toMillis ? data.u.toMillis() : 0;
+      if (u > (syncState.since || 0)) syncState.since = u;
+      let p;
+      try { p = await decrypt(S.keys.encKey, data.c); } catch (e) { continue; }
+      const st = syncState.items[p.lid];
+      if (st && st.t >= p.t) continue; // こちらの方が新しい
+      let val = p.v;
+      if (mine && !st && val && mine.has(p.lid)) val = mergeVals(p.lid, mine.get(p.lid), val);
+      applyItem(p.lid, val);
+      syncState.items[p.lid] = {h: p.v ? hash(JSON.stringify(p.v)) : null, t: p.t};
+      changed = true;
+    }
+    S.fromCache = snap.metadata.fromCache;
+    const firstDone = S.initial && !snap.metadata.fromCache;
+    if (firstDone) S.initial = false;
+    saveSyncState();
+    if (changed) safeRender();
+    if (changed || firstDone) save(); // 統合した内容やこの端末だけの内容を送る
+    updateStatus();
+  }
+
+  async function pushDiff() {
+    if (!S || S.initial) return;
+    const items = itemsOf(db), ops = [];
+    for (const [lid, v] of items) {
+      const h = hash(JSON.stringify(v)), st = syncState.items[lid];
+      if (!st || st.h !== h) ops.push([lid, v, h]);
+    }
+    for (const lid in syncState.items) if (!items.has(lid) && syncState.items[lid].h !== null) ops.push([lid, null, null]);
+    if (!ops.length) return;
+    const t = Date.now(), cur = S, {F} = cur;
+    for (const [lid, v, h] of ops) {
+      const c = await encrypt(cur.keys.encKey, {lid, v, t});
+      const ref = F.doc(cur.col, await docIdFor(cur.keys.macKey, lid));
+      syncState.items[lid] = {h, t};
+      cur.pending++;
+      F.setDoc(ref, {c, u: F.serverTimestamp()}).then(
+        () => { cur.pending--; updateStatus(); },
+        err => { cur.pending--; setSync('error', err.code === 'permission-denied' ? 'アクセスが拒否されました。Firestore のルールを確認してください' : err.message); });
+    }
+    saveSyncState(); updateStatus();
+  }
+
+  function setSync(st, msg) {
+    syncStatus = st; syncMsg = msg || '';
+    document.body.dataset.sync = st;
+    renderFoot();
+    if (!$('menuModal').hidden) renderSyncBox();
+  }
+  function updateStatus() {
+    if (!S || syncStatus === 'error') return;
+    if (S.pending > 0) setSync(navigator.onLine ? 'pending' : 'offline');
+    else if (!navigator.onLine) setSync('offline');
+    else setSync(S.fromCache ? 'connecting' : 'synced');
+  }
+  window.addEventListener('online', () => {
+    if (syncStatus === 'error') syncStatus = 'connecting';
+    if (!S && syncState) initSync(); else updateStatus();
+  });
+  window.addEventListener('offline', updateStatus);
+
+  // 入力中に書き換えると打っている文字が消えるので、入力欄を離れてから描き直す
+  // （タスク追加欄は描き直しで消えないので対象外。メモを書いている間は、メモ以外は描き直す）
+  let renderLater = false;
+  const editing = () => { const a = document.activeElement; return a && a.closest ? (a.id === 'notes' ? 'notes' : a.closest('#tasks, #sched') ? 'list' : '') : ''; };
+  function safeRender() {
+    const e = editing();
+    if (!e) { render(); return; }
+    renderLater = true;
+    if (e === 'notes') { renderHead(); renderTasks(); renderSched(); renderFoot(); }
+  }
+  document.addEventListener('focusout', () => setTimeout(() => { if (renderLater && !editing()) { renderLater = false; render(); } }, 0));
+
+  // --- 画面 ---
+  function renderSyncBox() {
+    const box = $('syncBox');
+    if (!syncOn) { box.hidden = true; return; }
+    box.hidden = false;
+    const on = !!S;
+    $('syncForm').hidden = on;
+    $('syncLogout').hidden = !on && !syncState;
+    $('syncStatus').textContent = on
+      ? `${syncState.email} で同期しています。${SYNC_LABEL[syncStatus] || ''}${syncMsg ? '（' + syncMsg + '）' : ''}`
+      : (syncMsg || 'PCとスマホで同じ手帳を使えます。');
+  }
+  function authError(err) {
+    const c = (err && err.code) || '';
+    if (c === 'auth/email-already-in-use') return 'このメールアドレスはもう設定済みです。「ほかの端末と同じ手帳につなぐ」を押してください。';
+    if (/invalid-credential|wrong-password|user-not-found|invalid-login/.test(c)) return 'メールアドレスか合言葉が違います。';
+    if (c === 'auth/network-request-failed') return 'ネットにつながりませんでした。';
+    if (c === 'auth/too-many-requests') return '試した回数が多すぎます。しばらく待ってからもう一度どうぞ。';
+    if (c === 'auth/operation-not-allowed') return 'Firebase で「メール/パスワード」のログインが有効になっていません。';
+    if (c === 'auth/invalid-email') return 'メールアドレスの形が正しくありません。';
+    return '接続できませんでした：' + (c || (err && err.message) || err);
+  }
+  async function connect(mode) {
+    const email = $('syncEmail').value.trim(), pass = $('syncPass').value, pass2 = $('syncPass2').value, msg = $('syncErr');
+    msg.textContent = '';
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { msg.textContent = 'メールアドレスを入力してください。'; return; }
+    if (pass.length < 10) { msg.textContent = '合言葉は10文字以上にしてください。'; return; }
+    if (mode === 'create' && pass !== pass2) { msg.textContent = '確認用の合言葉が一致しません。'; return; }
+    if (!navigator.onLine) { msg.textContent = 'ネットにつないでから操作してください。'; return; }
+    const btns = [$('syncLogin'), $('syncCreate')];
+    btns.forEach(b => { b.disabled = true; });
+    $('syncStatus').textContent = '暗号化の鍵を作っています…（数秒かかります）';
+    try {
+      const keys = await deriveKeys(email, pass);
+      const {auth, A} = await loadFirebase();
+      if (mode === 'create') await A.createUserWithEmailAndPassword(auth, email, keys.authPw);
+      else await A.signInWithEmailAndPassword(auth, email, keys.authPw);
+      await kvSet('keys', {encKey: keys.encKey, macKey: keys.macKey});
+      $('syncPass').value = $('syncPass2').value = '';
+      syncState = null;
+      await startSync(keys, true);
+      toast(mode === 'create' ? '同期を始めました' : 'ほかの端末の手帳とつながりました');
+    } catch (err) {
+      msg.textContent = authError(err);
+    } finally {
+      btns.forEach(b => { b.disabled = false; });
+      renderSyncBox();
+    }
+  }
+  async function disconnect() {
+    if (!confirm('この端末の同期をやめますか？\n手帳の内容はこの端末に残ります。ほかの端末やサーバーの内容は消えません。')) return;
+    try {
+      if (S && S.unsub) S.unsub();
+      S = null;
+      const {auth, fs, A, F} = await loadFirebase();
+      await A.signOut(auth);
+      await F.terminate(fs);
+      await F.clearIndexedDbPersistence(fs);
+    } catch (e) {}
+    try { await kvSet('keys', undefined); } catch (e) {}
+    syncState = null; saveSyncState();
+    location.reload();
+  }
+  async function initSync() {
+    if (!syncOn || !syncState) return;
+    let keys;
+    try { keys = await kvGet('keys'); } catch (e) {}
+    if (!keys) { syncMsg = 'もう一度つなぎ直してください。'; return; }
+    try {
+      const {auth} = await loadFirebase();
+      await auth.authStateReady();
+      if (!auth.currentUser || auth.currentUser.uid !== syncState.uid) { syncMsg = 'もう一度つなぎ直してください。'; return; }
+      await startSync(keys, false);
+    } catch (e) {
+      setSync('offline', '同期の部品を読み込めませんでした（ネットにつながると再開します）');
+    }
+  }
+  $('syncLogin').onclick = () => connect('login');
+  $('syncCreate').onclick = () => connect('create');
+  $('syncLogout').onclick = disconnect;
+  if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) // 手元での確認用
+    window.__techoTest = {deriveKeys, encrypt, decrypt, itemsOf, applyItem, mergeVals, hash, docIdFor};
 
   // ---------- スマホ用タブ ----------
   const TAB_KEY = 'daily-techo-tab';
@@ -752,6 +1098,7 @@ button{cursor:pointer}
   }
 
   render();
+  initSync();
 })();
 </script>
 </body>
